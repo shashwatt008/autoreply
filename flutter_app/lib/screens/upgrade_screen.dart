@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../constants/app_constants.dart';
 import '../services/api_service.dart';
 
@@ -13,6 +14,39 @@ class UpgradeScreen extends StatefulWidget {
 class _UpgradeScreenState extends State<UpgradeScreen> {
   bool _isProcessing = false;
   bool _paymentSuccess = false;
+  late Razorpay _razorpay;
+
+  @override
+  void initState() {
+    super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  void _onPaymentSuccess(PaymentSuccessResponse response) {
+    _handlePaymentSuccess({
+      'razorpay_order_id': response.orderId ?? '',
+      'razorpay_payment_id': response.paymentId ?? '',
+      'razorpay_signature': response.signature ?? '',
+    });
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    setState(() => _isProcessing = false);
+    _showError('Payment failed: ${response.message ?? "Unknown error"}');
+  }
+
+  void _onExternalWallet(ExternalWalletResponse response) {
+    _showError('External wallet selected: ${response.walletName}');
+  }
 
   final _features = [
     _Feature(Icons.psychology_rounded, 'AI Smart Match', 'Detect relevant comments using AI'),
@@ -47,56 +81,19 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
   }
 
   void _openRazorpay(String orderId) {
-    // Razorpay integration
-    // Using try-catch since razorpay_flutter may not be configured yet
+    var options = {
+      'key': AppConstants.razorpayKey,
+      'amount': AppConstants.proPrice,
+      'name': AppConstants.appName,
+      'order_id': orderId,
+      'description': 'Pro Plan - Lifetime',
+      'prefill': {'contact': '', 'email': ''},
+      'theme': {'color': '#6C63FF'},
+    };
     try {
-      // The actual Razorpay implementation would look like:
-      // var options = {
-      //   'key': AppConstants.razorpayKey,
-      //   'amount': AppConstants.proPrice,
-      //   'name': AppConstants.appName,
-      //   'order_id': orderId,
-      //   'description': 'Pro Plan - Lifetime',
-      //   'prefill': {'contact': '', 'email': ''},
-      //   'theme': {'color': '#6C63FF'},
-      // };
-      // _razorpay.open(options);
-
-      // For now, show a dialog explaining Razorpay setup is needed
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Razorpay Setup Required',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          content: Text(
-            'To enable payments, configure your Razorpay API key in app_constants.dart and ensure razorpay_flutter is properly set up for your platform.',
-            style: GoogleFonts.inter(fontSize: 14, color: AppConstants.textSecondary),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                // Simulate payment success for testing
-                _handlePaymentSuccess({
-                  'razorpay_order_id': orderId,
-                  'razorpay_payment_id': 'test_payment_id',
-                  'razorpay_signature': 'test_signature',
-                });
-              },
-              child: const Text('Simulate Success'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                setState(() => _isProcessing = false);
-              },
-              child: const Text('Close'),
-            ),
-          ],
-        ),
-      );
+      _razorpay.open(options);
     } catch (e) {
-      _showError('Razorpay is not configured. Please check setup.');
+      _showError('Could not open Razorpay. Please try again.');
       setState(() => _isProcessing = false);
     }
   }

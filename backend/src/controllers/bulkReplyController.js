@@ -448,8 +448,9 @@ async function processBulkReply(jobId) {
             }).eq('id', comment.id);
 
             // Increment replied_count on the job
+            successCount++;
             await supabase.from('bulk_reply_jobs').update({
-                replied_count: job.replied_count + (++successCount),
+                replied_count: job.replied_count + successCount,
                 updated_at: new Date().toISOString()
             }).eq('id', jobId);
 

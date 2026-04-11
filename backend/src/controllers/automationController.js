@@ -92,8 +92,19 @@ exports.updateRule = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
-    // TODO: if updating to enable pro features, check plan again.
-    // Simplifying: assuming frontend checks. Backend enforcement ideal but skipping for brevity.
+    // Check plan if enabling pro features
+    const hasPro = updates.trigger_type === 'ai' || updates.reply_type === 'ai' || updates.enable_dm;
+    if (hasPro) {
+        const { data: user } = await supabase
+            .from('users')
+            .select('subscription_plan')
+            .eq('id', userId)
+            .single();
+
+        if (user?.subscription_plan === 'free') {
+            return res.status(403).json({ error: 'Pro feature locked', code: 'PRO_REQUIRED' });
+        }
+    }
 
     const { data, error } = await supabase
         .from('automation_rules')

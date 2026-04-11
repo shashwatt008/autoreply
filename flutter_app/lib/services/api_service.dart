@@ -116,6 +116,23 @@ class ApiService {
 
   // ─── Automation Rules ───
 
+  static Future<int> getRuleCount({required String platform}) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/automation?platform=$platform'),
+        headers: await _headers(),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final rules = data is List ? data : (data['rules'] ?? data['data'] ?? []);
+        return (rules as List).where((r) => r['is_active'] == true).length;
+      }
+      return 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   static Future<List<AutomationModel>> getAutomationRules({
     required String pageId,
     String? platform,

@@ -22,8 +22,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   UserModel? _user;
   bool _isLoading = true;
   bool _hasError = false;
-  final int _fbRulesCount = 0;
-  final int _igRulesCount = 0;
+  int _fbRulesCount = 0;
+  int _igRulesCount = 0;
 
   @override
   void initState() {
@@ -53,9 +53,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       await AuthService.saveUserInfo(user.name, user.profilePic);
 
+      // Fetch rule counts per platform
+      final fbRules = await ApiService.getRuleCount(platform: 'facebook');
+      final igRules = await ApiService.getRuleCount(platform: 'instagram');
+
       if (mounted) {
         setState(() {
           _user = user;
+          _fbRulesCount = fbRules;
+          _igRulesCount = igRules;
           _isLoading = false;
         });
       }

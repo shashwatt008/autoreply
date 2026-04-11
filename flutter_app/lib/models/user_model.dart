@@ -23,7 +23,7 @@ class UserModel {
       name: json['name'] ?? '',
       email: json['email'] ?? '',
       profilePic: json['profilePic'] ?? json['profile_pic'],
-      plan: json['plan'] ?? 'free',
+      plan: json['subscription_plan'] ?? json['plan'] ?? 'free',
       facebookId: json['facebookId'] ?? json['facebook_id'],
     );
   }
