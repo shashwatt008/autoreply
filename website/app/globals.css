@@ -18,6 +18,6 @@ html {
 
 body {
   font-family: var(--font-sans);
-  color: var(--color-text);
-  background: var(--color-bg);
+  color: #ffffff;
+  background: #0A0A0A;
 }
