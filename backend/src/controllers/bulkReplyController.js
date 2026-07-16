@@ -1,5 +1,6 @@
 const axios = require('axios');
 const supabase = require('../config/supabase');
+const { resolveIgAuth } = require('../utils/igAuth');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -121,23 +122,13 @@ exports.fetchComments = async (req, res) => {
                 return res.status(400).json({ error: 'accountId query param is required for Instagram' });
             }
 
-            // Look up the IG account to find linked page_id
-            const { data: igAccount } = await supabase
-                .from('instagram_accounts')
-                .select('page_id, ig_user_id')
-                .eq('ig_user_id', accountId)
-                .single();
-
-            if (!igAccount) {
-                return res.status(404).json({ error: 'Instagram account not found' });
+            const igAuth = await resolveIgAuth(accountId);
+            if (!igAuth) {
+                return res.status(404).json({ error: 'Instagram account not found or no access token' });
             }
+            pageAccessToken = igAuth.accessToken;
 
-            pageAccessToken = await getPageAccessToken(igAccount.page_id);
-            if (!pageAccessToken) {
-                return res.status(404).json({ error: 'Linked page not found or no access token' });
-            }
-
-            const response = await axios.get(`https://graph.facebook.com/v18.0/${postId}/comments`, {
+            const response = await axios.get(`${igAuth.graphBase}/${postId}/comments`, {
                 params: {
                     fields: 'id,text,username,from,timestamp',
                     limit: 100,
@@ -148,7 +139,7 @@ exports.fetchComments = async (req, res) => {
             comments = (response.data.data || [])
                 .filter(c => {
                     // Filter out comments from the IG account itself
-                    if (c.from && c.from.id === igAccount.ig_user_id) return false;
+                    if (c.from && c.from.id === accountId) return false;
                     return true;
                 })
                 .map(c => ({
@@ -295,20 +286,25 @@ async function processBulkReply(jobId) {
     // Get page access token
     let pageAccessToken = null;
     let igUserId = null;
+    let igGraphBase = 'https://graph.facebook.com/v21.0';
 
     if (job.platform === 'facebook') {
         pageAccessToken = await getPageAccessToken(job.page_id);
     } else if (job.platform === 'instagram') {
-        // For Instagram, look up the IG account to get ig_user_id and the linked page token
+        // job.page_id is either a linked Facebook Page id (legacy accounts) or
+        // directly the ig_user_id (accounts connected via direct Instagram Login)
         const { data: igAccount } = await supabase
             .from('instagram_accounts')
-            .select('ig_user_id, page_id')
+            .select('ig_user_id')
             .eq('page_id', job.page_id)
             .single();
 
-        if (igAccount) {
-            igUserId = igAccount.ig_user_id;
-            pageAccessToken = await getPageAccessToken(igAccount.page_id);
+        igUserId = igAccount?.ig_user_id || job.page_id;
+
+        const igAuth = await resolveIgAuth(igUserId);
+        if (igAuth) {
+            pageAccessToken = igAuth.accessToken;
+            igGraphBase = igAuth.graphBase;
         }
     }
 
@@ -355,7 +351,7 @@ async function processBulkReply(jobId) {
         }
 
         try {
-            const GRAPH_API = 'https://graph.facebook.com/v21.0';
+            const FB_GRAPH_API = 'https://graph.facebook.com/v21.0';
 
             // Generate reply text
             let replyText = '';
@@ -377,13 +373,13 @@ async function processBulkReply(jobId) {
 
             // Post the reply
             if (job.platform === 'facebook') {
-                await axios.post(`${GRAPH_API}/${comment.comment_id}/comments`, {
+                await axios.post(`${FB_GRAPH_API}/${comment.comment_id}/comments`, {
                     message: replyText
                 }, {
                     params: { access_token: pageAccessToken }
                 });
             } else if (job.platform === 'instagram') {
-                await axios.post(`${GRAPH_API}/${comment.comment_id}/replies`, {
+                await axios.post(`${igGraphBase}/${comment.comment_id}/replies`, {
                     message: replyText
                 }, {
                     params: { access_token: pageAccessToken }
@@ -396,7 +392,7 @@ async function processBulkReply(jobId) {
                 // Follow-gate flow: send "here's your content" + Get Content button
                 try {
                     const dmText = job.dm_message || `Hey! Here's the content you asked for`;
-                    await axios.post(`${GRAPH_API}/${igUserId}/messages`, {
+                    await axios.post(`${igGraphBase}/${igUserId}/messages`, {
                         recipient: { id: comment.commenter_id },
                         message: {
                             text: dmText,
@@ -431,13 +427,13 @@ async function processBulkReply(jobId) {
                 // Normal DM flow
                 try {
                     if (job.platform === 'facebook') {
-                        await axios.post(`${GRAPH_API}/${comment.comment_id}/private_replies`, {
+                        await axios.post(`${FB_GRAPH_API}/${comment.comment_id}/private_replies`, {
                             message: job.dm_message
                         }, {
                             params: { access_token: pageAccessToken }
                         });
                     } else if (job.platform === 'instagram' && igUserId) {
-                        await axios.post(`${GRAPH_API}/${igUserId}/messages`, {
+                        await axios.post(`${igGraphBase}/${igUserId}/messages`, {
                             recipient: { id: comment.commenter_id },
                             message: { text: job.dm_message }
                         }, {

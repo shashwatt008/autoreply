@@ -6,7 +6,8 @@ CREATE SCHEMA IF NOT EXISTS face_auto_dm;
 -- Users table
 CREATE TABLE IF NOT EXISTS face_auto_dm.users (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    facebook_user_id TEXT UNIQUE NOT NULL,
+    facebook_user_id TEXT UNIQUE,
+    instagram_user_id TEXT UNIQUE,
     name TEXT,
     email TEXT,
     facebook_user_access_token TEXT,
@@ -66,6 +67,8 @@ CREATE TABLE IF NOT EXISTS face_auto_dm.instagram_accounts (
     profile_picture_url TEXT,
     followers_count INTEGER DEFAULT 0,
     page_id TEXT,
+    access_token TEXT,
+    token_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

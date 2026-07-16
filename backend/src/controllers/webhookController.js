@@ -1,5 +1,6 @@
 const axios = require('axios');
 const supabase = require('../config/supabase');
+const { resolveIgAuth } = require('../utils/igAuth');
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const GRAPH_API = 'https://graph.facebook.com/v21.0';
@@ -99,8 +100,8 @@ async function generateAIReply(prompt, commentMessage) {
 
 // ── Helper: send IG DM ──────────────────────────────────────────────────────
 
-async function sendIgDm(igUserId, recipientId, message, pageAccessToken) {
-    return axios.post(`${GRAPH_API}/${igUserId}/messages`, {
+async function sendIgDm(igUserId, recipientId, message, pageAccessToken, graphBase = GRAPH_API) {
+    return axios.post(`${graphBase}/${igUserId}/messages`, {
         recipient: { id: recipientId },
         message
     }, {
@@ -108,26 +109,12 @@ async function sendIgDm(igUserId, recipientId, message, pageAccessToken) {
     });
 }
 
-// ── Helper: get IG account's page access token ──────────────────────────────
+// ── Helper: get IG account's access token (direct Instagram Login, or via linked Page) ──
 
 async function getIgPageToken(igUserId) {
-    const { data: igAccount } = await supabase
-        .from('instagram_accounts')
-        .select('page_id, username')
-        .eq('ig_user_id', igUserId)
-        .single();
-
-    if (!igAccount) return null;
-
-    const { data: pageData } = await supabase
-        .from('facebook_pages')
-        .select('page_access_token')
-        .eq('page_id', igAccount.page_id)
-        .single();
-
-    if (!pageData) return null;
-
-    return { pageAccessToken: pageData.page_access_token, username: igAccount.username };
+    const auth = await resolveIgAuth(igUserId);
+    if (!auth) return null;
+    return { pageAccessToken: auth.accessToken, username: auth.username, graphBase: auth.graphBase };
 }
 
 // ── Facebook Comment Handler (unchanged) ────────────────────────────────────
@@ -260,7 +247,7 @@ async function handleInstagramComment(igUserId, commentData) {
 
         const tokenInfo = await getIgPageToken(igUserId);
         if (!tokenInfo) return;
-        const { pageAccessToken, username } = tokenInfo;
+        const { pageAccessToken, username, graphBase } = tokenInfo;
 
         // ── Comment Reply ──
         // If follow-gate is on, reply with friendly "check your DM" instead of the configured reply
@@ -287,7 +274,7 @@ async function handleInstagramComment(igUserId, commentData) {
         }
 
         if (commentReplyText) {
-            await axios.post(`${GRAPH_API}/${commentId}/replies`, {
+            await axios.post(`${graphBase}/${commentId}/replies`, {
                 message: commentReplyText
             }, {
                 params: { access_token: pageAccessToken }
@@ -312,7 +299,7 @@ async function handleInstagramComment(igUserId, commentData) {
                                 payload: 'FOLLOW_GATE_GET_CONTENT'
                             }
                         ]
-                    }, pageAccessToken);
+                    }, pageAccessToken, graphBase);
 
                     // Save to pending
                     await supabase.from('pending_follow_dms').upsert({
@@ -332,7 +319,7 @@ async function handleInstagramComment(igUserId, commentData) {
                     // Normal DM flow
                     await sendIgDm(igUserId, commenterId, {
                         text: rule.dm_message
-                    }, pageAccessToken);
+                    }, pageAccessToken, graphBase);
                     console.log('IG DM Sent');
                 }
             } catch (dmError) {
@@ -347,10 +334,10 @@ async function handleInstagramComment(igUserId, commentData) {
 
 // ── Check if user is in last 100 followers ──────────────────────────────────
 
-async function checkIsFollower(igUserId, commenterId, pageAccessToken) {
+async function checkIsFollower(igUserId, commenterId, pageAccessToken, graphBase = GRAPH_API) {
     try {
         // Fetch last 100 followers only
-        const response = await axios.get(`${GRAPH_API}/${igUserId}`, {
+        const response = await axios.get(`${graphBase}/${igUserId}`, {
             params: {
                 fields: 'followers.limit(100){id,username}',
                 access_token: pageAccessToken
@@ -392,18 +379,18 @@ async function handleInstagramMessage(igUserId, msgEvent) {
 
         const tokenInfo = await getIgPageToken(igUserId);
         if (!tokenInfo) return;
-        const { pageAccessToken, username } = tokenInfo;
+        const { pageAccessToken, username, graphBase } = tokenInfo;
 
         // ── Step 2: They tapped "Get Content" ──
         if (quickReplyPayload === 'FOLLOW_GATE_GET_CONTENT' || messageText.toLowerCase() === 'get content') {
             // Check if they already follow
-            const isFollower = await checkIsFollower(igUserId, senderId, pageAccessToken);
+            const isFollower = await checkIsFollower(igUserId, senderId, pageAccessToken, graphBase);
 
             if (isFollower) {
                 // Already following! Send the file right away
                 await sendIgDm(igUserId, senderId, {
                     text: `Here you go! ${pending.file_url}`
-                }, pageAccessToken);
+                }, pageAccessToken, graphBase);
 
                 await supabase.from('pending_follow_dms').update({
                     status: 'delivered',
@@ -423,7 +410,7 @@ async function handleInstagramMessage(igUserId, msgEvent) {
                             payload: 'FOLLOW_GATE_CHECK_FOLLOW'
                         }
                     ]
-                }, pageAccessToken);
+                }, pageAccessToken, graphBase);
                 console.log('IG Follow request sent (not following yet)', senderId);
             }
             return;
@@ -436,13 +423,13 @@ async function handleInstagramMessage(igUserId, msgEvent) {
             || messageText.toLowerCase() === "i am already following";
 
         if (isCheckFollow) {
-            const isFollower = await checkIsFollower(igUserId, senderId, pageAccessToken);
+            const isFollower = await checkIsFollower(igUserId, senderId, pageAccessToken, graphBase);
 
             if (isFollower) {
                 // Verified! Send the file
                 await sendIgDm(igUserId, senderId, {
                     text: `Here you go! ${pending.file_url}`
-                }, pageAccessToken);
+                }, pageAccessToken, graphBase);
 
                 await supabase.from('pending_follow_dms').update({
                     status: 'delivered',
@@ -466,7 +453,7 @@ async function handleInstagramMessage(igUserId, msgEvent) {
 
                 await sendIgDm(igUserId, senderId, {
                     text: `We still don't see a follow from you, so we can't send the file. Follow us and comment again on the post to get a new link!`
-                }, pageAccessToken);
+                }, pageAccessToken, graphBase);
                 console.log('IG Follow-gate expired (3 failed attempts)', senderId);
                 return;
             }
@@ -488,7 +475,7 @@ async function handleInstagramMessage(igUserId, msgEvent) {
                         payload: 'FOLLOW_GATE_CHECK_FOLLOW'
                     }
                 ]
-            }, pageAccessToken);
+            }, pageAccessToken, graphBase);
             console.log(`IG Follow reminder sent (attempt ${attempts}/${MAX_ATTEMPTS})`, senderId);
             return;
         }
@@ -506,7 +493,7 @@ async function handleInstagramMessage(igUserId, msgEvent) {
                         payload: 'FOLLOW_GATE_GET_CONTENT'
                     }
                 ]
-            }, pageAccessToken);
+            }, pageAccessToken, graphBase);
         }
 
     } catch (e) {

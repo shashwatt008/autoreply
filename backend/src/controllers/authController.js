@@ -13,6 +13,92 @@ exports.login = (req, res) => {
     res.redirect(url);
 };
 
+// ── Instagram Login (direct — no Facebook Page required) ────────────────────
+
+const IG_REDIRECT_URI = process.env.IG_REDIRECT_URI || 'http://localhost:3001/auth/instagram/callback';
+const IG_SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments';
+
+exports.loginInstagram = (req, res) => {
+    const url = `https://www.instagram.com/oauth/authorize?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(IG_REDIRECT_URI)}&scope=${IG_SCOPES}&response_type=code`;
+    res.redirect(url);
+};
+
+exports.instagramCallback = async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.status(400).send('No code received');
+
+    try {
+        // 1. Exchange code for a short-lived access token
+        const params = new URLSearchParams();
+        params.append('client_id', APP_ID);
+        params.append('client_secret', APP_SECRET);
+        params.append('grant_type', 'authorization_code');
+        params.append('redirect_uri', IG_REDIRECT_URI);
+        params.append('code', code);
+
+        const shortTokenRes = await axios.post('https://api.instagram.com/oauth/access_token', params);
+        const { access_token: shortLivedToken, user_id: igUserId } = shortTokenRes.data;
+
+        // 2. Exchange for a long-lived token (~60 days)
+        const longTokenRes = await axios.get('https://graph.instagram.com/access_token', {
+            params: {
+                grant_type: 'ig_exchange_token',
+                client_secret: APP_SECRET,
+                access_token: shortLivedToken
+            }
+        });
+        const accessToken = longTokenRes.data.access_token;
+        const expiresIn = longTokenRes.data.expires_in;
+        const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000) : null;
+
+        // 3. Get the IG profile
+        const profileRes = await axios.get('https://graph.instagram.com/v21.0/me', {
+            params: {
+                fields: 'user_id,username,name,account_type,profile_picture_url',
+                access_token: accessToken
+            }
+        });
+        const igProfile = profileRes.data;
+
+        // 4. Upsert User in Supabase, keyed on instagram_user_id
+        const { data: user, error } = await supabase
+            .from('users')
+            .upsert({
+                instagram_user_id: String(igProfile.user_id || igUserId),
+                name: igProfile.name || igProfile.username,
+                subscription_plan: 'free',
+                reply_limit: 100,
+                reply_count: 0
+            }, { onConflict: 'instagram_user_id' })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Supabase Error:', error);
+            return res.status(500).send('Database Error');
+        }
+
+        // 5. Upsert the Instagram account with its own direct token — no Page involved
+        await supabase.from('instagram_accounts').upsert({
+            user_id: user.id,
+            ig_user_id: String(igProfile.user_id || igUserId),
+            username: igProfile.username,
+            profile_picture_url: igProfile.profile_picture_url || null,
+            access_token: accessToken,
+            token_expires_at: expiresAt,
+            page_id: null
+        }, { onConflict: 'ig_user_id' });
+
+        // 6. Create JWT and redirect to dashboard
+        const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
+        res.redirect(`${FRONTEND_URL}/dashboard?token=${token}`);
+
+    } catch (err) {
+        console.error('Instagram Auth Error:', err.response?.data || err.message);
+        res.status(500).send('Instagram Authentication Failed');
+    }
+};
+
 exports.callback = async (req, res) => {
     const code = req.query.code;
     if (!code) return res.status(400).send('No code received');
