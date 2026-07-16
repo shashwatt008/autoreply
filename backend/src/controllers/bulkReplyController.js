@@ -8,6 +8,15 @@ function randomDelay(minSeconds, maxSeconds) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Meta/Instagram rate-limit signals: code 4 (app request limit), code 17 (user
+// request limit), code 32 (page request limit), code 613 (custom rate limit),
+// subcode 2446079 (spammy behavior block)
+function isRateLimitError(err) {
+    const code = err.response?.data?.error?.code;
+    const subcode = err.response?.data?.error?.error_subcode;
+    return code === 4 || code === 17 || code === 32 || code === 613 || subcode === 2446079;
+}
+
 async function generateAIReply(prompt, commentMessage) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -330,6 +339,7 @@ async function processBulkReply(jobId) {
 
     let successCount = 0;
     let failCount = 0;
+    let rateLimited = false;
 
     for (const comment of pendingComments) {
         // Re-check job status (user may have paused)
@@ -415,6 +425,7 @@ async function processBulkReply(jobId) {
                     dmSent = true;
                 } catch (dmErr) {
                     console.error(`Follow-gate DM failed for ${comment.comment_id}:`, dmErr.response?.data || dmErr.message);
+                    if (isRateLimitError(dmErr)) rateLimited = true;
                 }
             } else if (job.enable_dm && job.dm_message) {
                 // Normal DM flow
@@ -436,6 +447,7 @@ async function processBulkReply(jobId) {
                     dmSent = true;
                 } catch (dmErr) {
                     console.error(`DM failed for comment ${comment.comment_id}:`, dmErr.response?.data || dmErr.message);
+                    if (isRateLimitError(dmErr)) rateLimited = true;
                 }
             }
 
@@ -456,12 +468,29 @@ async function processBulkReply(jobId) {
 
         } catch (err) {
             console.error(`Error replying to comment ${comment.comment_id}:`, err.response?.data || err.message);
-            failCount++;
 
-            // Save error to comment but continue
-            await supabase.from('bulk_reply_comments').update({
-                error: err.response?.data?.error?.message || err.message
-            }).eq('id', comment.id);
+            if (isRateLimitError(err)) {
+                rateLimited = true;
+            } else {
+                failCount++;
+                // Save error to comment but continue
+                await supabase.from('bulk_reply_comments').update({
+                    error: err.response?.data?.error?.message || err.message
+                }).eq('id', comment.id);
+            }
+        }
+
+        if (rateLimited) {
+            // Instagram is throttling us — stop immediately instead of hammering
+            // a rate-limited endpoint. This comment stays unreplied (reply_sent
+            // stays false) so resuming the job later picks it back up.
+            console.warn(`Bulk reply job ${jobId} hit an Instagram/Facebook rate limit. Auto-pausing.`);
+            await supabase.from('bulk_reply_jobs').update({
+                status: 'paused',
+                error_message: 'Auto-paused: Instagram/Facebook rate limit detected. Wait a while, then resume the job.',
+                updated_at: new Date().toISOString()
+            }).eq('id', jobId);
+            return;
         }
 
         // Wait random delay before next comment
