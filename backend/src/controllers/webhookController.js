@@ -323,7 +323,8 @@ async function handleInstagramComment(igUserId, commentData) {
                         rule_id: rule.id,
                         comment_id: commentId,
                         file_url: rule.file_url,
-                        status: 'pending'
+                        status: 'pending',
+                        attempt_count: 0
                     }, { onConflict: 'ig_user_id,commenter_ig_id' });
 
                     console.log('IG Follow-gate DM sent (step 1: Get Content button)');
@@ -449,21 +450,46 @@ async function handleInstagramMessage(igUserId, msgEvent) {
                 }).eq('id', pending.id);
 
                 console.log('IG File delivered to verified follower', senderId);
-            } else {
-                // Still not following — send the same follow request again
-                const profileUrl = username ? `https://instagram.com/${username}` : '';
-                await sendIgDm(igUserId, senderId, {
-                    text: `Hmm, we don't see you in our followers yet! Make sure to follow us and try again.\n\n${profileUrl ? `Follow here: ${profileUrl}` : 'Follow our page and come back!'}`,
-                    quick_replies: [
-                        {
-                            content_type: 'text',
-                            title: "I'm already following",
-                            payload: 'FOLLOW_GATE_CHECK_FOLLOW'
-                        }
-                    ]
-                }, pageAccessToken);
-                console.log('IG Follow reminder sent (still not following)', senderId);
+                return;
             }
+
+            const attempts = (pending.attempt_count || 0) + 1;
+            const MAX_ATTEMPTS = 3;
+
+            if (attempts >= MAX_ATTEMPTS) {
+                // Out of tries — close the gate
+                await supabase.from('pending_follow_dms').update({
+                    status: 'expired',
+                    attempt_count: attempts,
+                    updated_at: new Date().toISOString()
+                }).eq('id', pending.id);
+
+                await sendIgDm(igUserId, senderId, {
+                    text: `We still don't see a follow from you, so we can't send the file. Follow us and comment again on the post to get a new link!`
+                }, pageAccessToken);
+                console.log('IG Follow-gate expired (3 failed attempts)', senderId);
+                return;
+            }
+
+            // Still not following — send the same follow request again, tries remaining
+            await supabase.from('pending_follow_dms').update({
+                attempt_count: attempts,
+                updated_at: new Date().toISOString()
+            }).eq('id', pending.id);
+
+            const triesLeft = MAX_ATTEMPTS - attempts;
+            const profileUrl = username ? `https://instagram.com/${username}` : '';
+            await sendIgDm(igUserId, senderId, {
+                text: `Hmm, we don't see you in our followers yet! Make sure to follow us and try again. (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left)\n\n${profileUrl ? `Follow here: ${profileUrl}` : 'Follow our page and come back!'}`,
+                quick_replies: [
+                    {
+                        content_type: 'text',
+                        title: "I'm already following",
+                        payload: 'FOLLOW_GATE_CHECK_FOLLOW'
+                    }
+                ]
+            }, pageAccessToken);
+            console.log(`IG Follow reminder sent (attempt ${attempts}/${MAX_ATTEMPTS})`, senderId);
             return;
         }
 

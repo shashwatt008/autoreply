@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS face_auto_dm.pending_follow_dms (
     comment_id TEXT,
     file_url TEXT NOT NULL,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'expired')),
+    attempt_count INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

@@ -121,14 +121,14 @@ URL: https://developers.facebook.com/apps/2153190152200830
 - App Icon: upload one
 - Privacy Policy URL: `https://autoreply-io.web.app/privacy`
 - Terms of Service URL: `https://autoreply-io.web.app/terms`
-- Data Deletion Callback URL: `https://autoreply-api-xxxxx-el.a.run.app/auth/deletion-callback`
+- Data Deletion Callback URL: `https://autoreply-io.vercel.app/auth/deletion-callback`
 - App Domains: `autoreply-io.web.app`
 
 ### Facebook Login → Settings
-- Valid OAuth Redirect URIs: `https://autoreply-api-xxxxx-el.a.run.app/auth/facebook/callback`
+- Valid OAuth Redirect URIs: `https://autoreply-io.vercel.app/auth/facebook/callback`
 
 ### Webhooks
-- Callback URL: `https://autoreply-api-xxxxx-el.a.run.app/webhook`
+- Callback URL: `https://autoreply-io.vercel.app/webhook`
 - Verify Token: (same VERIFY_TOKEN from env)
 - Subscribe to fields:
   - **Page**: `feed` (for Facebook comment webhooks)
