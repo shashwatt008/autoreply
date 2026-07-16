@@ -16,7 +16,7 @@ const app = express();
 // CORS
 const allowedOrigins = [
     process.env.FRONTEND_URL,
-    'https://autoreply-io.web.app',
+    'https://autoreply-io-web.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001'
 ].filter(Boolean);
