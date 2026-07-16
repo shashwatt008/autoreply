@@ -14,12 +14,16 @@ exports.login = (req, res) => {
 };
 
 // ── Instagram Login (direct — no Facebook Page required) ────────────────────
+// The "API setup with Instagram login" product has its OWN app ID/secret,
+// separate from the main Facebook app's APP_ID/APP_SECRET above.
 
+const IG_APP_ID = process.env.IG_APP_ID;
+const IG_APP_SECRET = process.env.IG_APP_SECRET;
 const IG_REDIRECT_URI = process.env.IG_REDIRECT_URI || 'http://localhost:3001/auth/instagram/callback';
 const IG_SCOPES = 'instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments';
 
 exports.loginInstagram = (req, res) => {
-    const url = `https://www.instagram.com/oauth/authorize?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(IG_REDIRECT_URI)}&scope=${IG_SCOPES}&response_type=code`;
+    const url = `https://www.instagram.com/oauth/authorize?client_id=${IG_APP_ID}&redirect_uri=${encodeURIComponent(IG_REDIRECT_URI)}&scope=${IG_SCOPES}&response_type=code`;
     res.redirect(url);
 };
 
@@ -30,8 +34,8 @@ exports.instagramCallback = async (req, res) => {
     try {
         // 1. Exchange code for a short-lived access token
         const params = new URLSearchParams();
-        params.append('client_id', APP_ID);
-        params.append('client_secret', APP_SECRET);
+        params.append('client_id', IG_APP_ID);
+        params.append('client_secret', IG_APP_SECRET);
         params.append('grant_type', 'authorization_code');
         params.append('redirect_uri', IG_REDIRECT_URI);
         params.append('code', code);
@@ -43,7 +47,7 @@ exports.instagramCallback = async (req, res) => {
         const longTokenRes = await axios.get('https://graph.instagram.com/access_token', {
             params: {
                 grant_type: 'ig_exchange_token',
-                client_secret: APP_SECRET,
+                client_secret: IG_APP_SECRET,
                 access_token: shortLivedToken
             }
         });
